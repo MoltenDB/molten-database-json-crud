@@ -1,0 +1,29 @@
+{
+  "name": "molten-database-json-crud",
+  "version": "0.1.0",
+  "description": "Database interface for json-crud database",
+  "main": "index.js",
+  "types": "src/typings/json-crud.d.ts",
+  "scripts": {
+    "test": "jasmine"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MoltenDB/molten-database-json-crud.git"
+  },
+  "author": "Jack Farley <bytesnz>",
+  "license": "GPL-3.0",
+  "bugs": {
+    "url": "https://github.com/MoltenDB/molten-database-json-crud/issues"
+  },
+  "homepage": "https://github.com/MoltenDB/molten-database-json-crud#readme",
+  "devDependencies": {
+    "@types/jasmine": "^2.5.45",
+    "jasmine-es6": "^0.4.0",
+    "rmdir": "^1.2.0"
+  },
+  "dependencies": {
+    "denodeify": "^1.2.1",
+    "json-crud": "^0.3.0"
+  }
+}

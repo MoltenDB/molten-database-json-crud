@@ -1,0 +1,14 @@
+{
+  "compileOnSave": true,
+  "compilerOptions": {
+    "outDir": "./dist",
+    "target": "es5",
+    "module": "CommonJS",
+    "noImplicitAny": false,
+    "jsx": "preserve",
+    "sourceMap": false
+  },
+  "include": [
+    "src/**/*.ts"
+  ]
+}
