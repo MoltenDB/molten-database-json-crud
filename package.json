@@ -5,7 +5,9 @@
   "main": "index.js",
   "types": "src/typings/json-crud.d.ts",
   "scripts": {
-    "test": "jasmine"
+    "test": "jasmine",
+    "lint": "tslint src/**/*.ts && tsc --noEmit",
+    "dev": "tsc -w"
   },
   "repository": {
     "type": "git",
