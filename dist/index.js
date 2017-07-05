@@ -237,6 +237,8 @@ var createJsonCrudDatabase = function (options) {
         });
     });
 };
+createJsonCrudDatabase.label = 'JSON CRUD Storage';
+createJsonCrudDatabase.description = 'Uses simple JSON files or folders of JSON files to store items';
 createJsonCrudDatabase.types = ['string', 'number', 'object', 'array',
     'boolean'];
 createJsonCrudDatabase.features = ['keyValue'];
