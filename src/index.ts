@@ -8,6 +8,7 @@ const rmdir = require('rmdir');
 const denodeify = require('denodeify');
 
 const stat = denodeify(fs.stat);
+const unlink = denodeify(fs.unlink);
 const access = denodeify(fs.access);
 const mkdirpp = denodeify(mkdirp);
 const rmdirp = denodeify(rmdir);
@@ -16,24 +17,35 @@ let createJsonCrudDatabase = (options: MDB.Storage.JsonCrudDatabaseOptions):
     Promise<MDB.Storage.StorageConnection> => {
   if (!options) {
     return Promise.reject(new Error('options must be given'));
-  } else if (!options.baseFolder) {
-    return Promise.reject(new Error('baseFolder must be given'));
   }
-  return stat(options.baseFolder).then((stat) => {
-    if (stat.isDirectory()) {
-      // Check access to folder
-      return access(options.baseFolder);
-    } else {
-      return Promise.reject(new Error('baseFolder is not a directory'));
+  
+  let checkPromise;
+
+  if (options.baseFolder === false) {
+    options.keepConnected = true;
+    checkPromise = Promise.resolve();
+  } else {
+    if (!options.baseFolder) {
+      return Promise.reject(new Error('baseFolder must be given'));
     }
-  }, (error) => {
-    if (error.code = 'ENOENT') {
-      // Try creating the directory
-      return mkdirpp(options.baseFolder);
-    } else {
-      return Promise.reject(error);
-    }
-  }).then(() => {
+
+    checkPromise = stat(options.baseFolder).then((stat) => {
+      if (stat.isDirectory()) {
+        // Check access to folder
+        return access(options.baseFolder, fs.R_OK | fs.W_OK);
+      } else {
+        return Promise.reject(new Error('baseFolder is not a directory'));
+      }
+    }, (error) => {
+      if (error.code = 'ENOENT') {
+        // Try creating the directory
+        return mkdirpp(options.baseFolder);
+      } else {
+        return Promise.reject(error);
+      }
+    });
+  }
+  return checkPromise.then(() => {
     let databases = [];
 
     /** @internal
@@ -60,10 +72,14 @@ let createJsonCrudDatabase = (options: MDB.Storage.JsonCrudDatabaseOptions):
      *
      * @param store Store to get the path for
      */
-    const getStorePath = (store: string) => {
+    const getStorePath = (store: string): string | false => {
+      if (options.baseFolder === false) {
+        return false;
+      }
+
       let storeFile = store;
       // Append .json to filename if it should be stored as a file
-      if (!store.endsWith('.json') && !checkOption('storesAsFolders', store)) {
+      if (!checkOption('storesAsFolders', store)) {
         storeFile += '.json';
       }
 
@@ -77,13 +93,14 @@ let createJsonCrudDatabase = (options: MDB.Storage.JsonCrudDatabaseOptions):
      *
      * @returns Promise that resolves to the JsonCrud connection
      */
-    const getJsonCrud = (store: MDB.Storage.StoreOptions, create?: boolean) => {
+    const getJsonCrud = (store: MDB.Storage.StoreOptions, create?: boolean)
+    : Promise<JsonDB.JsonDBInstance> => {
       // Check if the connection is cached
-      if (typeof databases[store] !== 'undefined') {
+      if (typeof databases[store.name] !== 'undefined') {
         if (create) {
           return Promise.reject(new Error(`store ${store.name} already exists`));
         }
-        const connection = databases[store];
+        const connection = databases[store.name];
         if (connection instanceof Promise) {
           return connection;
         } else {
@@ -94,19 +111,30 @@ let createJsonCrudDatabase = (options: MDB.Storage.JsonCrudDatabaseOptions):
       // Check for the existence of the store
       const storePath = getStorePath(store.name);
 
-      return stat(storePath).then(() => {
-        if (create) {
-          return Promise.reject(new Error(`store ${store.name} already exists`));
+      let checkPromise;
+
+      if (storePath === false) {
+        if (!create && typeof databases[store.name] === 'undefined') {
+          return Promise.reject('Store does not exist');
         }
-      }, (error) => {
-        if (error.code === 'ENOENT') {
-          if (!create) {
-            return Promise.reject(new Error('Store does not exist'));
+        checkPromise = Promise.resolve();
+      } else {
+        checkPromise = stat(storePath).then(() => {
+          if (create) {
+            return Promise.reject(new Error(`store ${store.name} already exists`));
           }
-        } else {
-          return Promise.reject(error);
-        }
-      }).then(() => {
+        }, (error) => {
+          if (error.code === 'ENOENT') {
+            if (!create) {
+              return Promise.reject(new Error('Store does not exist'));
+            }
+          } else {
+            return Promise.reject(error);
+          }
+        })
+      }
+
+      return checkPromise.then(() => {
         const storeOptions = /*TODO options.storeOptions[store] ||*/ options.options || {};
         const keepConnected = checkOption('keepConnected', store.name);
 
@@ -116,14 +144,14 @@ let createJsonCrudDatabase = (options: MDB.Storage.JsonCrudDatabaseOptions):
           id: '_id'
         }).then((database) => {
           if (keepConnected) {
-            databases[store] = database;
+            databases[store.name] = database;
           }
 
           return database;
         });
 
         if (keepConnected) {
-          databases[store] = jsonCrud;
+          databases[store.name] = jsonCrud;
         }
 
         return jsonCrud;
@@ -228,8 +256,20 @@ let createJsonCrudDatabase = (options: MDB.Storage.JsonCrudDatabaseOptions):
       }
     };
 
-    const deleteStore = (store: MDB.Storage.StoreOptions): Promise<undefined> => {
+    const deleteStore = (store: MDB.Storage.StoreOptions): Promise<undefined | boolean> => {
+      if (typeof store !== 'object') {
+        return Promise.reject(new Error('Need store options of store to delete'));
+      }
+
       const storePath = getStorePath(store.name);
+
+      if (storePath === false) {
+        if (typeof databases[store.name] !== 'undefined') {
+          delete databases[store.name];
+          return Promise.resolve(true);
+        }
+        return Promise.resolve(false);
+      }
 
       // Check if we have a cached connection and remove
       if (typeof databases[store.name] !== 'undefined') {
@@ -237,14 +277,47 @@ let createJsonCrudDatabase = (options: MDB.Storage.JsonCrudDatabaseOptions):
       }
 
       return stat(storePath).then((stat) => {
-        return rmdirp(storePath);
-      });
+          let promise;
+          if (!checkOption('storesAsFolders', store)) {
+            promise = unlink(storePath);
+          } else {
+            promise = rmdirp(storePath);
+          }
+          return promise.then(() => Promise.resolve(true));
+        }, (error) => {
+          if (error.code === 'ENOENT') {
+            return Promise.resolve(false);
+          } else {
+            return Promise.reject(error);
+          }
+        });
     };
 
-    const checkStore = (store: MDB.Storage.StoreOptions): Promise<undefined> => {
+    const checkStore = (store: MDB.Storage.StoreOptions): Promise<boolean | undefined> => {
+      if (typeof store !== 'object') {
+        return Promise.reject(new Error('Need store options of store to delete'));
+      }
+
       const storePath = getStorePath(store.name);
 
-      return stat(storePath).then(() => Promise.resolve());
+      if (storePath === false) {
+        if (typeof databases[store.name] === 'undefined') {
+          return Promise.resolve();
+        } else {
+          return Promise.resolve(true);
+        }
+      }
+
+      return stat(storePath).then(
+        () => Promise.resolve(true),
+        (error) => {
+          if (error.code === 'ENOENT') {
+            return Promise.resolve();
+          } else {
+            return Promise.reject(error);
+          }
+        }
+      );
     };
 
     const close = (): Promise<undefined> => {
@@ -264,5 +337,5 @@ createJsonCrudDatabase.label = 'JSON CRUD Storage';
 createJsonCrudDatabase.description = 'Uses simple JSON files or folders of JSON files to store items';
 createJsonCrudDatabase.types = ['string', 'number', 'object', 'array',
     'boolean'];
-createJsonCrudDatabase.features = ['keyValue'];
+createJsonCrudDatabase.features = ['keyValue', 'schemaless'];
 export default <MDB.Storage.connectStorage>createJsonCrudDatabase;

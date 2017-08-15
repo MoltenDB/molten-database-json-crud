@@ -70,6 +70,14 @@ describe('MoltenDB json-crud Storage Implementation', () => {
         label: 'with undefined options'
       },
     ],
+    goodOptions: [
+      {
+        label: 'with in-memory only option',
+        options: {
+          baseFolder: false
+        }
+      }
+    ],
     testOptions: <MDB.Database.JsonCrudDatabaseOptions>{
       baseFolder: 'test'
     }
