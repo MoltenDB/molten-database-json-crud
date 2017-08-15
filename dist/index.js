@@ -7,6 +7,7 @@ var __assign = (this && this.__assign) || Object.assign || function(t) {
     }
     return t;
 };
+Object.defineProperty(exports, "__esModule", { value: true });
 // import * as JsonCrud from 'json-crud';
 var JsonCrud = require('json-crud');
 var fs = require('fs');
@@ -15,6 +16,7 @@ var mkdirp = require('mkdirp');
 var rmdir = require('rmdir');
 var denodeify = require('denodeify');
 var stat = denodeify(fs.stat);
+var unlink = denodeify(fs.unlink);
 var access = denodeify(fs.access);
 var mkdirpp = denodeify(mkdirp);
 var rmdirp = denodeify(rmdir);
@@ -22,26 +24,34 @@ var createJsonCrudDatabase = function (options) {
     if (!options) {
         return Promise.reject(new Error('options must be given'));
     }
-    else if (!options.baseFolder) {
-        return Promise.reject(new Error('baseFolder must be given'));
+    var checkPromise;
+    if (options.baseFolder === false) {
+        options.keepConnected = true;
+        checkPromise = Promise.resolve();
     }
-    return stat(options.baseFolder).then(function (stat) {
-        if (stat.isDirectory()) {
-            // Check access to folder
-            return access(options.baseFolder);
+    else {
+        if (!options.baseFolder) {
+            return Promise.reject(new Error('baseFolder must be given'));
         }
-        else {
-            return Promise.reject(new Error('baseFolder is not a directory'));
-        }
-    }, function (error) {
-        if (error.code = 'ENOENT') {
-            // Try creating the directory
-            return mkdirpp(options.baseFolder);
-        }
-        else {
-            return Promise.reject(error);
-        }
-    }).then(function () {
+        checkPromise = stat(options.baseFolder).then(function (stat) {
+            if (stat.isDirectory()) {
+                // Check access to folder
+                return access(options.baseFolder, fs.R_OK | fs.W_OK);
+            }
+            else {
+                return Promise.reject(new Error('baseFolder is not a directory'));
+            }
+        }, function (error) {
+            if (error.code = 'ENOENT') {
+                // Try creating the directory
+                return mkdirpp(options.baseFolder);
+            }
+            else {
+                return Promise.reject(error);
+            }
+        });
+    }
+    return checkPromise.then(function () {
         var databases = [];
         /** @internal
          * Check whether a JsonCrud connection should be kept or not for a store
@@ -68,9 +78,12 @@ var createJsonCrudDatabase = function (options) {
          * @param store Store to get the path for
          */
         var getStorePath = function (store) {
+            if (options.baseFolder === false) {
+                return false;
+            }
             var storeFile = store;
             // Append .json to filename if it should be stored as a file
-            if (!store.endsWith('.json') && !checkOption('storesAsFolders', store)) {
+            if (!checkOption('storesAsFolders', store)) {
                 storeFile += '.json';
             }
             return path.join(options.baseFolder, storeFile);
@@ -84,11 +97,11 @@ var createJsonCrudDatabase = function (options) {
          */
         var getJsonCrud = function (store, create) {
             // Check if the connection is cached
-            if (typeof databases[store] !== 'undefined') {
+            if (typeof databases[store.name] !== 'undefined') {
                 if (create) {
                     return Promise.reject(new Error("store " + store.name + " already exists"));
                 }
-                var connection = databases[store];
+                var connection = databases[store.name];
                 if (connection instanceof Promise) {
                     return connection;
                 }
@@ -98,30 +111,40 @@ var createJsonCrudDatabase = function (options) {
             }
             // Check for the existence of the store
             var storePath = getStorePath(store.name);
-            return stat(storePath).then(function () {
-                if (create) {
-                    return Promise.reject(new Error("store " + store.name + " already exists"));
+            var checkPromise;
+            if (storePath === false) {
+                if (!create && typeof databases[store.name] === 'undefined') {
+                    return Promise.reject('Store does not exist');
                 }
-            }, function (error) {
-                if (error.code === 'ENOENT') {
-                    if (!create) {
-                        return Promise.reject(new Error('Store does not exist'));
+                checkPromise = Promise.resolve();
+            }
+            else {
+                checkPromise = stat(storePath).then(function () {
+                    if (create) {
+                        return Promise.reject(new Error("store " + store.name + " already exists"));
                     }
-                }
-                else {
-                    return Promise.reject(error);
-                }
-            }).then(function () {
+                }, function (error) {
+                    if (error.code === 'ENOENT') {
+                        if (!create) {
+                            return Promise.reject(new Error('Store does not exist'));
+                        }
+                    }
+                    else {
+                        return Promise.reject(error);
+                    }
+                });
+            }
+            return checkPromise.then(function () {
                 var storeOptions = options.options || {};
                 var keepConnected = checkOption('keepConnected', store.name);
                 var jsonCrud = JsonCrud(__assign({}, storeOptions, { path: storePath, id: '_id' })).then(function (database) {
                     if (keepConnected) {
-                        databases[store] = database;
+                        databases[store.name] = database;
                     }
                     return database;
                 });
                 if (keepConnected) {
-                    databases[store] = jsonCrud;
+                    databases[store.name] = jsonCrud;
                 }
                 return jsonCrud;
             });
@@ -212,18 +235,60 @@ var createJsonCrudDatabase = function (options) {
             }
         };
         var deleteStore = function (store) {
+            if (typeof store !== 'object') {
+                return Promise.reject(new Error('Need store options of store to delete'));
+            }
             var storePath = getStorePath(store.name);
+            if (storePath === false) {
+                if (typeof databases[store.name] !== 'undefined') {
+                    delete databases[store.name];
+                    return Promise.resolve(true);
+                }
+                return Promise.resolve(false);
+            }
             // Check if we have a cached connection and remove
             if (typeof databases[store.name] !== 'undefined') {
                 delete databases[store.name];
             }
             return stat(storePath).then(function (stat) {
-                return rmdirp(storePath);
+                var promise;
+                if (!checkOption('storesAsFolders', store)) {
+                    promise = unlink(storePath);
+                }
+                else {
+                    promise = rmdirp(storePath);
+                }
+                return promise.then(function () { return Promise.resolve(true); });
+            }, function (error) {
+                if (error.code === 'ENOENT') {
+                    return Promise.resolve(false);
+                }
+                else {
+                    return Promise.reject(error);
+                }
             });
         };
         var checkStore = function (store) {
+            if (typeof store !== 'object') {
+                return Promise.reject(new Error('Need store options of store to delete'));
+            }
             var storePath = getStorePath(store.name);
-            return stat(storePath).then(function () { return Promise.resolve(); });
+            if (storePath === false) {
+                if (typeof databases[store.name] === 'undefined') {
+                    return Promise.resolve();
+                }
+                else {
+                    return Promise.resolve(true);
+                }
+            }
+            return stat(storePath).then(function () { return Promise.resolve(true); }, function (error) {
+                if (error.code === 'ENOENT') {
+                    return Promise.resolve();
+                }
+                else {
+                    return Promise.reject(error);
+                }
+            });
         };
         var close = function () {
             return Promise.resolve();
@@ -241,6 +306,5 @@ createJsonCrudDatabase.label = 'JSON CRUD Storage';
 createJsonCrudDatabase.description = 'Uses simple JSON files or folders of JSON files to store items';
 createJsonCrudDatabase.types = ['string', 'number', 'object', 'array',
     'boolean'];
-createJsonCrudDatabase.features = ['keyValue'];
-Object.defineProperty(exports, "__esModule", { value: true });
+createJsonCrudDatabase.features = ['keyValue', 'schemaless'];
 exports.default = createJsonCrudDatabase;

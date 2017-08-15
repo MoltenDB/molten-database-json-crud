@@ -1,5 +1,5 @@
 declare namespace MDB.Storage {
-  export interface JsonCrudDatabaseOptions {
+  export interface JsonCrudDatabaseOptions extends MDB.Storage.StorageOptions {
     /// Folder to store the json-crud databases for each table
     baseFolder: string,
     /// Whether to or what tables to store each table as a json-crud folder database

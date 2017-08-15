@@ -1,4 +1,5 @@
 "use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
 var _1 = require("../");
 var molten_storage_1 = require("molten-storage");
 var fs = require('fs');
@@ -55,6 +56,14 @@ describe('MoltenDB json-crud Storage Implementation', function () {
             {
                 label: 'with undefined options'
             },
+        ],
+        goodOptions: [
+            {
+                label: 'with in-memory only option',
+                options: {
+                    baseFolder: false
+                }
+            }
         ],
         testOptions: {
             baseFolder: 'test'
