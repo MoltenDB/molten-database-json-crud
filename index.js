@@ -173,15 +173,50 @@ var createJsonCrudDatabase = function (options) {
                             return promise;
                         }
                     },
-                    read: function (filter) {
+                    read: function (filter, options) {
                         return jsonCrud.read(filter).then(function (results) {
-                            return Promise.resolve(Object.keys(results).map(function (key) {
+                            var resultArray = Object.keys(results).map(function (key) {
                                 return results[key];
-                            }));
+                            });
+                            if (options instanceof Object) {
+                                if (options.sort) {
+                                    var sortFields_1 = Object.keys(options.sort);
+                                    var i_1;
+                                    var _loop_1 = function () {
+                                        var sortField = sortFields_1[i_1];
+                                        resultArray.sort(function (a, b) {
+                                            if (i_1 != 0) {
+                                                var previousField = sortFields_1[i_1 - 1];
+                                                if (a[previousField] !== b[previousField]) {
+                                                    return 0;
+                                                }
+                                            }
+                                            if (options.sort[sortField] === 1) {
+                                                return a[sortField] > b[sortField];
+                                            }
+                                            else if (options.sort[sortField] === -1) {
+                                                return a[sortField] < b[sortField];
+                                            }
+                                            return 0;
+                                        });
+                                    };
+                                    for (i_1 = 0; i_1 < sortFields_1.length; i_1++) {
+                                        _loop_1();
+                                    }
+                                }
+                                if (options.limit) {
+                                    if (options.limit > 0) {
+                                        resultArray.splice(options.limit);
+                                    }
+                                }
+                            }
+                            return Promise.resolve(resultArray);
                         });
                     },
                     count: function (filter) {
-                        return jsonCrud.count(filter);
+                        return jsonCrud.read(filter).then(function (results) {
+                            return Promise.resolve(Object.keys(results).length);
+                        });
                     },
                     update: function (data, filter) {
                         if (!(data instanceof Array)) {

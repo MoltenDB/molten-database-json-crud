@@ -182,18 +182,55 @@ let createJsonCrudDatabase = (options: MDB.Storage.JsonCrudDatabaseOptions):
             }
           },
 
-          read: (filter: MDB.Storage.Filter)
+          read: (filter: MDB.Storage.Filter, options?: MDB.FilterOptions)
               : Promise<MDB.Storage.Result> => {
             return jsonCrud.read(filter).then((results) => {
-              return Promise.resolve(Object.keys(results).map((key) => {
+              let resultArray = Object.keys(results).map((key) => {
                 return results[key];
-              }));
+              });
+
+              if (options instanceof Object) {
+                if (options.sort) {
+                  const sortFields = Object.keys(options.sort);
+                  let i;
+
+                  for (i = 0; i < sortFields.length; i++) {
+                    const sortField = sortFields[i];
+                    resultArray.sort((a, b) => {
+                      if (i != 0) {
+                        const previousField = sortFields[i-1];
+                        if (a[previousField] !== b[previousField]) {
+                          return 0;
+                        }
+                      }
+
+                      if (options.sort[sortField] === 1) {
+                        return a[sortField] > b[sortField];
+                      } else if (options.sort[sortField] === -1) {
+                        return a[sortField] < b[sortField];
+                      }
+
+                      return 0;
+                    });
+                  }
+                }
+
+                if (options.limit) {
+                  if (options.limit > 0) {
+                    resultArray.splice(options.limit);
+                  }
+                }
+              }
+
+              return Promise.resolve(resultArray);
             });
           },
 
           count: (filter: MDB.Storage.Filter)
               : Promise<number> => {
-            return jsonCrud.count(filter);
+            return jsonCrud.read(filter).then((results) => {
+              return Promise.resolve(Object.keys(results).length);
+            });
           },
 
           update: (data: MDB.Storage.Data, filter: MDB.Storage.Filter)
