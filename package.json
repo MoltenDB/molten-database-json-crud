@@ -25,7 +25,7 @@
   },
   "dependencies": {
     "denodeify": "^1.2.1",
-    "json-crud": "^1.0.0",
+    "json-crud": "https://github.com/MeldCE/json-crud.git",
     "rmdir": "^1.2.0"
   }
 }
